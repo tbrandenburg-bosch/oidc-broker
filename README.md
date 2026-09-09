@@ -93,6 +93,71 @@ gh workflow run poc-mint.yml --ref <your-branch>
 The workflow fetches a token from the broker and prints only its
 `expires_in` (never the token itself) as a sanity check.
 
+> **Hint — one App, many repos and users:** a single GitHub App can be
+> installed on any number of repos (or org-wide) and authorized by any
+> number of users independently. This broker already supports many users
+> out of the box (`token_store.py` keys refresh tokens by GitHub user id),
+> but only supports **one** repo/ref at a time (`EXPECTED_REPOSITORY`,
+> `EXPECTED_REF` are single values in `.env`). Scaling to many repos means
+> turning those into an allow-list or policy lookup instead of one fixed
+> value — see the enterprise-setup table below.
+
+## User journey
+
+**First-time use** (one person, one time, needs a real browser):
+
+```
+ You                          Broker (your machine)         GitHub
+ │                                    │                        │
+ │ 1. Ask an admin to install the     │                        │
+ │    GitHub App on your repo ───────────────────────────────▶ │
+ │                                    │                        │
+ │ 2. Run `python -m broker.consent`  │                        │
+ │    ├─ opens browser to GitHub ───────────────────────────▶ │
+ │    ├─ you click "Authorize"        │                        │
+ │    │◀────────────── redirect with a one-time code ───────── │
+ │    └─ broker exchanges code for a refresh token,             │
+ │       stores it locally keyed by your GitHub user id         │
+ │                                    │                        │
+ │ 3. Give the admin your GitHub user id to add to the           │
+ │    broker's allow-list (ALLOWED_ACTOR_IDS)                    │
+ │                                                                │
+ └─ Done. You never touch this again unless you revoke access.  │
+```
+
+**Every subsequent use** (e.g. a workflow you triggered needs your token —
+fully automatic, no browser, no interaction from you):
+
+```
+ Your workflow run                    Broker                  GitHub
+ │                                    │                        │
+ │ 1. Actions mints a short-lived     │                        │
+ │    OIDC JWT for this run ─────────────────────────────────▶ │
+ │    (free, built-in, expires in minutes)                      │
+ │                                    │                        │
+ │ 2. Workflow POSTs the JWT to the broker's /mint ──────────▶ │
+ │                                    │                        │
+ │                    3. Broker verifies the JWT is genuinely   │
+ │                       signed by GitHub, and that repo/ref/   │
+ │                       actor_id all match what's expected     │
+ │                                    │                        │
+ │                    4. Broker looks up YOUR stored refresh    │
+ │                       token (from the one-time step above)   │
+ │                       and exchanges it for a fresh, short-   │
+ │                       lived user token ──────────────────▶ │
+ │                                    │◀── new ghu_ token ───── │
+ │                                    │                        │
+ │ ◀── broker returns the token to the workflow ──────────────  │
+ │                                    │                        │
+ │ 5. Workflow uses the token to act on GitHub as *you*         │
+ │    (e.g. comment on an issue) — token expires in ~8h and     │
+ │    is never logged                                            │
+```
+
+The key point: step 2 onward is **fully automatic** and repeats for every
+workflow run, forever — until you revoke the App's authorization. You only
+ever go through the "First-time use" flow once per person.
+
 ## Moving beyond a PoC: what a simple enterprise setup needs
 
 This repo intentionally cuts corners for a single-user, single-repo demo:
