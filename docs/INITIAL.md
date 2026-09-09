@@ -25,6 +25,9 @@ organization, account, or infrastructure is involved.
 - Settings -> Developer settings -> GitHub Apps -> New GitHub App
 - Callback URL: `http://localhost:8765/callback`
 - Enable "Request user authorization (OAuth) during installation"
+- Webhook: uncheck "Active" and leave the Webhook URL blank — this PoC's
+  broker doesn't consume any GitHub webhook events, only the OAuth callback
+  above. GitHub requires the Webhook URL field only when Active is checked.
 - Permissions: minimal (e.g. Issues: write) just to prove attribution
 - Install on this repository only
 
