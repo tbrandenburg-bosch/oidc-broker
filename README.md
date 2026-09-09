@@ -93,6 +93,30 @@ gh workflow run poc-mint.yml --ref <your-branch>
 The workflow fetches a token from the broker and prints only its
 `expires_in` (never the token itself) as a sanity check.
 
+## Moving beyond a PoC: what a simple enterprise setup needs
+
+This repo intentionally cuts corners for a single-user, single-repo demo:
+a local Python process, a JSON file for refresh tokens, and a free `ngrok`
+tunnel that changes URL on every restart. None of that is appropriate for
+real, ongoing use. Here's the minimum you'd need to change:
+
+| PoC shortcut | Enterprise replacement |
+|---|---|
+| Local `python -m broker.server` on your laptop | Deploy the broker as a real service — e.g. an **Azure Function App** (HTTP trigger) or a small container on App Service / Cloud Run. No laptop dependency, no "it only works while my machine is on". |
+| `ngrok` tunnel (ephemeral URL, free-tier warning page) | A stable public HTTPS endpoint — the Function App/App Service URL itself, behind your normal ingress/WAF. No tunnel needed at all once the broker isn't running locally. |
+| `.data/refresh_tokens.json` on local disk | A managed secret store: **Azure Key Vault**, AWS Secrets Manager, or a database with encryption at rest. Refresh tokens are long-lived credentials — treat them with the same care as passwords. |
+| `GITHUB_APP_CLIENT_SECRET` / `NGROK_AUTHTOKEN` in a local `.env` file | Injected at runtime from the platform's secret store (Key Vault references in App Settings, GitHub Actions OIDC-to-Azure federation, etc.) — never a file on disk. |
+| One hardcoded `ALLOWED_ACTOR_IDS` allow-list in `.env` | A real authorization policy: a small database/config mapping GitHub org teams or specific users to what they're allowed to mint, checked and audit-logged on every request. |
+| One GitHub App installed by one person, for one repo | The GitHub App installed at the **organization** level, with an approval process for which repos/teams can use it, and someone accountable for its permissions. |
+| No logging beyond stdout on your terminal | Structured, centralized logging (e.g. Azure Application Insights) — log every mint attempt (repo, ref, actor, allow/deny, timestamp) **without ever logging the token itself**. |
+| No rate limiting | Rate-limit and alert on unusual mint patterns (same actor minting unusually often, requests from unexpected repos, etc.) |
+| Manual `gh secret set POC_BROKER_URL` per tunnel restart | Not needed — a real deployed service has a fixed, known URL, set once as a repo/org secret. |
+
+In short: same core idea (verify a GitHub OIDC JWT, exchange a stored
+refresh token, return a short-lived user token) — but running as a proper
+managed service with real secret storage, logging, and an authorization
+policy instead of a hand-edited allow-list.
+
 ## Why this matters
 
 Normally, giving a CI job the ability to "act as a user" means storing a
