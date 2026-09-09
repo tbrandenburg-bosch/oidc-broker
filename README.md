@@ -1,63 +1,113 @@
 # oidc-broker
 
-PoC implementation of the plan in [`docs/INITIAL.md`](docs/INITIAL.md):
-exchange a real GitHub Actions OIDC JWT for a user-scoped GitHub token via a
-local broker. Everything stays within this account/repo.
+A small proof-of-concept that answers one question: **can a GitHub Actions
+workflow exchange its built-in OIDC identity for a token that acts as a real
+human user** — instead of a bot/service account — **without ever storing a
+long-lived credential in the workflow itself?**
 
-## Setup
+Answer: yes. This repo shows exactly how.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in secrets/values (see below)
+## The idea, in plain terms
+
+1. GitHub Actions can mint a short-lived, signed **ID token (JWT)** for any
+   workflow run, for free, with no extra setup. It's the same mechanism
+   cloud providers use for "OIDC login" instead of storing cloud secrets in
+   CI. Nobody but GitHub can forge this token.
+2. That JWT proves *"this exact workflow run, on this exact repo/branch,
+   really is happening right now"* — but it doesn't grant access to
+   anything by itself.
+3. We stand up a small **broker** (a tiny local web server) that:
+   - Checks the JWT is genuinely signed by GitHub (not forged)
+   - Checks it's for *this* repo, *this* branch, and an allow-listed user
+   - If everything checks out, hands back a **real GitHub token, scoped to
+     a human user** — obtained once via a one-time browser login, then
+     silently refreshed each time it's needed
+4. The workflow uses that token to act on GitHub *as that person* — e.g.
+   post an issue comment that shows up with their name and avatar, not a
+   bot's.
+
+```
+ GitHub Actions run                    Your machine
+┌─────────────────────┐         ┌───────────────────────────┐
+│ 1. mint OIDC JWT     │──POST──▶│ 2. broker verifies JWT     │
+│    (built-in,free)   │  /mint  │    + returns a user token  │
+└─────────────────────┘         └───────────────────────────┘
+                                          ▲
+                                          │ one-time browser login
+                                          │ (Step 2, done once)
+                                     you, the human
 ```
 
-Required `.env` values (see `.env.example` for the full list):
-- `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` — from the registered
-  GitHub App (docs/INITIAL.md Step 1)
-- `EXPECTED_REPOSITORY` — `owner/repo` of this repository
-- `EXPECTED_REF` — the exact feature branch ref the workflow runs on, e.g.
-  `refs/heads/my-feature`
-- `ALLOWED_ACTOR_IDS` — comma-separated GitHub user id(s) allowed through
-  the broker (get your id after running the consent step, or via
-  `gh api user --jq .id`)
+## What's in this repo
 
-## Run the PoC
+| Path | What it does |
+|---|---|
+| `broker/consent.py` | Run **once**: opens your browser, you click "Authorize", it stores a refresh token for your GitHub user id. |
+| `broker/server.py` | The broker itself. Verifies incoming JWTs and mints tokens on request. |
+| `broker/config.py` | Reads all settings from `.env`. |
+| `broker/token_store.py` | Tiny local file that remembers your refresh token (owner-only file permissions). |
+| `.github/workflows/poc-mint.yml` | The workflow step that requests a JWT and calls the broker. Only runs when manually triggered, and refuses to run on `main`. |
+| `docs/INITIAL.md` | The original detailed step-by-step plan this was built from. |
 
-1. **One-time user consent** (opens a browser, needs manual approval):
-   ```bash
-   python -m broker.consent
-   ```
-   Prints your GitHub user id — add it to `ALLOWED_ACTOR_IDS` in `.env`.
+## Try it yourself
 
-2. **Start the broker:**
-   ```bash
-   python -m broker.server
-   ```
-   Listens on `http://localhost:9000` (`/mint`).
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # then fill in the values below
+```
 
-3. **Expose it publicly** (separate terminal):
-   ```bash
-   ngrok http 9000
-   ```
-   Note the printed HTTPS URL.
+Fill in `.env`:
+- `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` — from
+  a GitHub App you register yourself (see `docs/INITIAL.md` Step 1)
+- `EXPECTED_REPOSITORY` — `owner/repo` of this repo
+- `EXPECTED_REF` — the exact branch the workflow will run on
+- `ALLOWED_ACTOR_IDS` — your GitHub user id (printed after step 1 below)
 
-4. **Set the repo secret** with that URL:
-   ```bash
-   gh secret set POC_BROKER_URL --body "https://<your-ngrok-subdomain>.ngrok-free.app"
-   ```
+**1. One-time login** (do this once, needs a real browser):
+```bash
+python -m broker.consent
+```
 
-5. **Push the feature branch** containing
-   `.github/workflows/poc-mint.yml` and trigger it:
-   ```bash
-   gh workflow run poc-mint.yml --ref <your-feature-branch>
-   ```
+**2. Start the broker:**
+```bash
+python -m broker.server
+```
 
-6. **Prove attribution** — see docs/INITIAL.md Step 6.
+**3. Make it reachable from GitHub's servers** (separate terminal):
+```bash
+ngrok http 9000
+```
+Copy the `https://...ngrok...` URL it prints.
+
+**4. Tell the workflow where to find it:**
+```bash
+gh secret set POC_BROKER_URL --body "https://<your-ngrok-url>"
+```
+
+**5. Run it:**
+```bash
+gh workflow run poc-mint.yml --ref <your-branch>
+```
+
+The workflow fetches a token from the broker and prints only its
+`expires_in` (never the token itself) as a sanity check.
+
+## Why this matters
+
+Normally, giving a CI job the ability to "act as a user" means storing a
+long-lived personal access token as a secret — if that secret leaks, it's
+valid until manually revoked. Here, nothing long-lived ever touches the
+workflow: the JWT is minted fresh per run and expires in minutes, and the
+actual user token never leaves the broker except as a short-lived response
+used immediately.
 
 ## Cleanup
 
-Follow the mandatory checklist in docs/INITIAL.md before closing the PoC
-(remove workflow step, delete secret, revoke app authorization, stop
-tunnel/broker, delete `.data/refresh_tokens.json`).
+This is a PoC, not a running service. When you're done experimenting:
+- Stop the broker and `ngrok` processes
+- `gh secret delete POC_BROKER_URL`
+- Revoke the GitHub App's authorization: https://github.com/settings/applications
+- Delete `.data/refresh_tokens.json`
+
+Full checklist: see `docs/INITIAL.md`.
