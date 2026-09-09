@@ -68,6 +68,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 
 def _exchange_code_for_tokens(code: str) -> dict:
     cfg = get_config()
+    print("Exchanging code for tokens...", flush=True)
     resp = requests.post(
         TOKEN_URL,
         headers={"Accept": "application/json"},
@@ -79,6 +80,7 @@ def _exchange_code_for_tokens(code: str) -> dict:
         },
         timeout=10,
     )
+    print(f"Code exchange responded: HTTP {resp.status_code}", flush=True)
     resp.raise_for_status()
     payload = resp.json()
     if "error" in payload:
@@ -87,6 +89,7 @@ def _exchange_code_for_tokens(code: str) -> dict:
 
 
 def _fetch_user_id(access_token: str) -> str:
+    print("Fetching user id...", flush=True)
     resp = requests.get(
         USER_URL,
         headers={
@@ -95,6 +98,7 @@ def _fetch_user_id(access_token: str) -> str:
         },
         timeout=10,
     )
+    print(f"User fetch responded: HTTP {resp.status_code}", flush=True)
     resp.raise_for_status()
     return str(resp.json()["id"])
 
@@ -124,9 +128,11 @@ def run() -> None:
     webbrowser.open(authorize_url)
 
     server = HTTPServer((cfg.oauth_callback_host, cfg.oauth_callback_port), _CallbackHandler)
-    print(f"Waiting for callback on {cfg.redirect_uri} ...")
+    print(f"Waiting for callback on {cfg.redirect_uri} ...", flush=True)
     server.handle_request()  # blocks for exactly one request
+    print("Callback handled, closing local server...", flush=True)
     server.server_close()
+    print("Local server closed.", flush=True)
 
     result = _CallbackHandler.result
     if "error" in result:

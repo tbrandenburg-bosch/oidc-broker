@@ -74,7 +74,9 @@ def _exchange_refresh_token(refresh_token: str) -> dict:
 
 @app.post("/mint")
 def mint():
+    log.info("Received /mint request, content-length=%s", request.content_length)
     body = request.get_json(silent=True) or {}
+    log.info("Parsed body, jwt present=%s", bool(body.get("jwt")))
     oidc_jwt = body.get("jwt")
     if not oidc_jwt:
         return jsonify({"error": "missing 'jwt' in request body"}), 400
@@ -99,7 +101,7 @@ def mint():
     try:
         tokens = _exchange_refresh_token(refresh_token)
     except (requests.RequestException, RuntimeError) as exc:
-        log.error("Refresh token exchange failed: %s", exc.__class__.__name__)
+        log.error("Refresh token exchange failed: %s: %s", exc.__class__.__name__, exc)
         return jsonify({"error": "token exchange failed"}), 502
 
     # GitHub rotates refresh tokens on each use — persist the new one.

@@ -19,19 +19,23 @@ def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def load(store_path: str) -> dict:
+def _load_unlocked(store_path: str) -> dict:
     path = Path(store_path)
     if not path.exists():
         return {}
+    return json.loads(path.read_text() or "{}")
+
+
+def load(store_path: str) -> dict:
     with _lock:
-        return json.loads(path.read_text() or "{}")
+        return _load_unlocked(store_path)
 
 
 def save_refresh_token(store_path: str, actor_id: str, refresh_token: str) -> None:
     path = Path(store_path)
     _ensure_parent(path)
     with _lock:
-        data = load(store_path)
+        data = _load_unlocked(store_path)
         data[str(actor_id)] = {"refresh_token": refresh_token}
         path.write_text(json.dumps(data, indent=2))
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
