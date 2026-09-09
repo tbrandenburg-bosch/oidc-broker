@@ -38,6 +38,9 @@ recorded here; store them in the local broker's secret storage only):
 - Owned by: `@tbrandenburg-bosch`
 - App ID: `4887051`
 - Client ID: `Iv23liUIsKcoWTlnBwXM`
+- Client Secret: generated and held locally only (required for the
+  `/login/oauth/access_token` exchanges in Steps 2 and 3; not recorded here,
+  not used by the workflow/runner side)
 
 ## Step 2 — One-time user consent (localhost)
 
