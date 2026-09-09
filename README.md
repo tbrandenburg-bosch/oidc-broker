@@ -178,6 +178,44 @@ refresh token, return a short-lived user token) — but running as a proper
 managed service with real secret storage, logging, and an authorization
 policy instead of a hand-edited allow-list.
 
+**The same two journeys, in an enterprise setup** — the flow doesn't
+change, only *where things run* and *who's accountable* for each step:
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant Admin
+    participant Broker as Broker (Function App)
+    participant KeyVault as Key Vault
+    participant GitHub
+
+    You->>Admin: Request access
+    Admin->>GitHub: Approve App install on your repo/team
+    You->>Broker: Start one-time consent (hosted, not on your laptop)
+    Broker->>GitHub: Authorize + exchange code
+    GitHub->>Broker: Refresh token
+    Broker->>KeyVault: Store refresh token securely
+    Admin->>Broker: Add you to the authorization policy
+    Note over You,Broker: Done — same as the PoC, just hosted centrally
+```
+
+```mermaid
+sequenceDiagram
+    participant Workflow as Any org workflow
+    participant Broker as Broker (Function App)
+    participant KeyVault as Key Vault
+    participant GitHub
+    participant Logs as Central logging
+
+    Workflow->>Broker: POST /mint with OIDC JWT (via fixed HTTPS URL)
+    Broker->>Broker: Verify JWT + check policy (repo/team/actor allowed?)
+    Broker->>KeyVault: Fetch this user's refresh token
+    Broker->>GitHub: Exchange for a fresh access token
+    GitHub->>Broker: New short-lived token
+    Broker->>Logs: Record mint attempt (never the token value)
+    Broker->>Workflow: Return the token
+```
+
 ## Why this matters
 
 Normally, giving a CI job the ability to "act as a user" means storing a
