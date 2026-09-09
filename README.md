@@ -106,57 +106,53 @@ The workflow fetches a token from the broker and prints only its
 
 **First-time use** (one person, one time, needs a real browser):
 
-```
- You                          Broker (your machine)         GitHub
- │                                    │                        │
- │ 1. Ask an admin to install the     │                        │
- │    GitHub App on your repo ───────────────────────────────▶ │
- │                                    │                        │
- │ 2. Run `python -m broker.consent`  │                        │
- │    ├─ opens browser to GitHub ───────────────────────────▶ │
- │    ├─ you click "Authorize"        │                        │
- │    │◀────────────── redirect with a one-time code ───────── │
- │    └─ broker exchanges code for a refresh token,             │
- │       stores it locally keyed by your GitHub user id         │
- │                                    │                        │
- │ 3. Give the admin your GitHub user id to add to the           │
- │    broker's allow-list (ALLOWED_ACTOR_IDS)                    │
- │                                                                │
- └─ Done. You never touch this again unless you revoke access.  │
+```mermaid
+sequenceDiagram
+    participant You
+    participant Admin
+    participant Broker as Broker (your machine)
+    participant GitHub
+
+    You->>Admin: Ask to install the GitHub App on your repo
+    Admin->>GitHub: Install App on repo
+    You->>Broker: Run "python -m broker.consent"
+    Broker->>GitHub: Open browser to authorize URL
+    GitHub->>You: Show consent screen
+    You->>GitHub: Click "Authorize"
+    GitHub->>Broker: Redirect with one-time code
+    Broker->>GitHub: Exchange code for refresh token
+    GitHub->>Broker: Refresh token
+    Broker->>Broker: Store refresh token, keyed by your user id
+    You->>Admin: Share your GitHub user id
+    Admin->>Broker: Add id to ALLOWED_ACTOR_IDS
+    Note over You,Broker: Done — you never repeat this unless access is revoked
 ```
 
 **Every subsequent use** (e.g. a workflow you triggered needs your token —
 fully automatic, no browser, no interaction from you):
 
-```
- Your workflow run                    Broker                  GitHub
- │                                    │                        │
- │ 1. Actions mints a short-lived     │                        │
- │    OIDC JWT for this run ─────────────────────────────────▶ │
- │    (free, built-in, expires in minutes)                      │
- │                                    │                        │
- │ 2. Workflow POSTs the JWT to the broker's /mint ──────────▶ │
- │                                    │                        │
- │                    3. Broker verifies the JWT is genuinely   │
- │                       signed by GitHub, and that repo/ref/   │
- │                       actor_id all match what's expected     │
- │                                    │                        │
- │                    4. Broker looks up YOUR stored refresh    │
- │                       token (from the one-time step above)   │
- │                       and exchanges it for a fresh, short-   │
- │                       lived user token ──────────────────▶ │
- │                                    │◀── new ghu_ token ───── │
- │                                    │                        │
- │ ◀── broker returns the token to the workflow ──────────────  │
- │                                    │                        │
- │ 5. Workflow uses the token to act on GitHub as *you*         │
- │    (e.g. comment on an issue) — token expires in ~8h and     │
- │    is never logged                                            │
+```mermaid
+sequenceDiagram
+    participant Workflow as Your workflow run
+    participant Actions as GitHub Actions
+    participant Broker
+    participant GitHub
+
+    Workflow->>Actions: Request an OIDC ID token
+    Actions->>Workflow: Short-lived JWT (expires in minutes)
+    Workflow->>Broker: POST /mint with the JWT
+    Broker->>Broker: Verify JWT signature + repo/ref/actor_id claims
+    Broker->>Broker: Look up your stored refresh token
+    Broker->>GitHub: Exchange refresh token for a fresh access token
+    GitHub->>Broker: New ghu_ token (expires in ~8h)
+    Broker->>Workflow: Return the token
+    Workflow->>GitHub: Act as you (e.g. comment on an issue)
+    Note over Workflow,GitHub: Token value is never logged anywhere
 ```
 
-The key point: step 2 onward is **fully automatic** and repeats for every
-workflow run, forever — until you revoke the App's authorization. You only
-ever go through the "First-time use" flow once per person.
+The key point: the second diagram is **fully automatic** and repeats for
+every workflow run, forever — until you revoke the App's authorization. You
+only ever go through the "First-time use" flow once per person.
 
 ## Moving beyond a PoC: what a simple enterprise setup needs
 
