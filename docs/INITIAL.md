@@ -31,6 +31,14 @@ organization, account, or infrastructure is involved.
 - Permissions: minimal (e.g. Issues: write) just to prove attribution
 - Install on this repository only
 
+Registered app (identifiers only — Client Secret and private key are never
+recorded here; store them in the local broker's secret storage only):
+
+- Name: `btr8fe-oidc-broker`
+- Owned by: `@tbrandenburg-bosch`
+- App ID: `4887051`
+- Client ID: `Iv23liUIsKcoWTlnBwXM`
+
 ## Step 2 — One-time user consent (localhost)
 
 - Local script opens:
