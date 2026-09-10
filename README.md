@@ -216,6 +216,70 @@ sequenceDiagram
     Broker->>Workflow: Return the token
 ```
 
+## "Doesn't the App need to be installed on every repo?" — yes, but that's a one-time, org-wide step
+
+A common objection: acting as a user via a GitHub App requires the App to
+be **installed** on the target repo(s), and installing an App needs an
+org/repo admin — which sounds like it doesn't scale without constant admin
+involvement. This is worth untangling, because two separate steps get
+conflated:
+
+| Step | Who does it | How often | Result |
+|---|---|---|---|
+| **Install** the App on a repo/org | An org or repo admin | **Once, org-wide** (`--repository-selection all` or a defined set of repos) | The App is *permitted* to act within those repos at all |
+| **Authorize** the App as a user (OAuth consent) | Each developer, for themselves | Once per developer, **no admin needed** | A refresh token bound to that specific user is issued |
+
+Installation and per-user authorization are independent. Once an admin
+installs **one** broker App org-wide, every subsequent developer onboarding
+is fully self-service (`python -m broker.consent`) — no further admin
+ticket per person, and none per repo added later if the App was installed
+org-wide. The admin dependency is a single bootstrap action for the whole
+org, not a recurring cost per user.
+
+This also means there is no need for "one App per developer" or "one App
+per org per developer" — a single App, installed once, can be authorized
+independently by any number of users (`broker/token_store.py` already keys
+refresh tokens by GitHub user id to support exactly this). Concerns about
+GitHub App count limits (e.g. "can we even create 5000+ apps?") don't apply
+here — the design only ever needs **one** broker App.
+
+### Compared to a long-lived personal access token in an env variable
+
+An alternative some teams reach for is simpler on paper: each developer
+generates a personal access token once and drops it into a CI secret/env
+var, with no admin step at all. That's real, and it's a legitimate reason
+to prefer it in a pinch — but it trades away everything this broker buys:
+
+| | Static PAT in env | OIDC broker (this repo) |
+|---|---|---|
+| Admin involvement | None | One-time, org-wide App install |
+| Rotation | Manual, easy to forget, often never happens | Automatic — each token lives ~8h, reissued per request from a refresh token |
+| Blast radius if leaked | Valid until someone manually revokes it | Expires within hours regardless; scoped to a specific repo/ref/actor at mint time |
+| Bound to a specific workflow context | No — works anywhere the token's scope reaches | Yes — verified against the OIDC JWT's `repository`, `ref`, and `actor_id` claims before minting |
+| Auditability | Weak — just "a token was used" | Every mint attempt is checkable per workflow run and actor |
+| Ongoing developer burden | Must remember to rotate/store the secret themselves | One-time browser consent, invisible afterwards |
+
+The PAT approach is not being invalidated here — it's more scalable in the
+sense that it needs zero manual admin action per rollout, and a developer
+could hold that credential across several repos in one go depending on its
+scope. But it comes at the cost of a long-lived, unrotated, unaudited
+credential sitting in plaintext-adjacent CI config. The broker trades a
+single, one-time admin bootstrap for automatic rotation, tight scoping, and
+auditability going forward.
+
+### What's still genuinely missing for an org-wide rollout
+
+Beyond the enterprise-setup table above, two policy gaps are specific to
+scaling past one repo/branch:
+
+1. `EXPECTED_REPOSITORY` / `EXPECTED_REF` in `broker/config.py` are single
+   values today — an org rollout needs these to become an allow-list or
+   policy lookup (e.g. `org/*` plus an allowed-branch pattern) instead of
+   one fixed pair per broker instance.
+2. Offboarding: when a developer leaves, their stored refresh token must be
+   revoked as part of the standard offboarding process — this needs to be
+   a defined step, not an afterthought.
+
 ## Why this matters
 
 Normally, giving a CI job the ability to "act as a user" means storing a
